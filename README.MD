@@ -1,0 +1,13 @@
+# MYIO Home Assistant intergation module
+
+[![Repository size](https://img.shields.io/github/repo-size/playframework/playframework.svg?logo=git)](https://github.com/playframework/playframework)
+
+MYIO is a home automation platform (<a href="http://smarthomeninja.hu" target="_blank">MYIO home page</a>). This repository provides integration of this platform to Home Assistant.
+
+## License
+
+Copyright (C)
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this project except in compliance with the License. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
