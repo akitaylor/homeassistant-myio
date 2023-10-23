@@ -4,6 +4,8 @@ import aiohttp
 import json
 import asyncio
 import base64
+import traceback
+import sys
 
 from slugify import slugify
 
@@ -205,35 +207,39 @@ class CommsThread2:
                             _port_http,
                         )
 
-                        # convert xml data to _temp_json
-                        for i in range(0, 100):
-                            response = response.replace(f"</{str(i)}>", '",')
-                        response = response.replace("<", '"')
-                        response = response.replace(">", '":"')
-                        _length = len(response)
-                        _list = list(response)
-                        _list[_length - 2] = "}"
-                        response = "".join(_list)
-                        response = "{" + response
-                        _temp_json = json.loads(response)
+                        _LOGGER.debug(f"Sensors '{desc}' response:")
+                        _LOGGER.debug(response)
 
-                        # merge descriptions (_temp_json) to server_data dictionary
-                        for element in _temp_json:
-                            el_mod = 0
-                            if desc == "h" or desc == "f":
-                                el_mod = 100
-                            elif desc == "g":
-                                el_mod = 500
-                            for json_id in _desc_data:
-                                if int(element) + el_mod == _desc_data[json_id]["id"]:
-                                    _desc_data[json_id]["description"] = _temp_json[
-                                        element
-                                    ]
-                                    break
-                        server_data[_DESCRIPTIONS[desc]] = _desc_data.copy()
-                    except:  # pylint: disable=bare-except
-                        if not _invalid:
-                            _LOGGER.debug("descriptions - except")
+                        if len(response) > 0:
+                            # convert xml data to _temp_json
+                            for i in range(0, 100):
+                                response = response.replace(f"</{str(i)}>", '",')
+                            response = response.replace("<", '"')
+                            response = response.replace(">", '":"')
+                            _length = len(response)
+                            _list = list(response)
+                            _list[_length - 2] = "}"
+                            response = "".join(_list)
+                            response = "{" + response
+                            _temp_json = json.loads(response)
+
+                            # merge descriptions (_temp_json) to server_data dictionary
+                            for element in _temp_json:
+                                el_mod = 0
+                                if desc == "h" or desc == "f":
+                                    el_mod = 100
+                                elif desc == "g":
+                                    el_mod = 500
+                                for json_id in _desc_data:
+                                    if int(element) + el_mod == _desc_data[json_id]["id"]:
+                                        _desc_data[json_id]["description"] = _temp_json[
+                                            element
+                                        ]
+                                        break
+                            server_data[_DESCRIPTIONS[desc]] = _desc_data.copy()
+                    except Exception as e:  # pylint: disable=bare-except
+                        _LOGGER.debug(f"Exception in loading descriptions: {e}")
+                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
 
             except:  # pylint: disable=bare-except
                 _LOGGER.debug("Except")
@@ -264,8 +270,9 @@ class CommsThread2:
                                     _LOGGER.debug("Invalid")
                                     server_status = "Invalid"
                                     _invalid = True
-                        except:  # pylint: disable=bare-except
-                            _LOGGER.debug("except online sens_out.json")
+                        except Exception as e:  # pylint: disable=bare-except
+                            _LOGGER.debug(f"Exception in loading sens_out.json: {e}")
+                            _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                             if not _invalid:
                                 server_status = "Offline"
 
