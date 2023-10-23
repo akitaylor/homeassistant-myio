@@ -1,6 +1,6 @@
 # MYIO Home Assistant intergation module
 
-[![Repository size](https://img.shields.io/github/repo-size/playframework/playframework.svg?logo=git)](https://github.com/playframework/playframework)
+[![Repository size](https://img.shields.io/github/repo-size/playframework/playframework.svg?logo=git)](https://github.com/akitaylor/homeassistant-myio)
 
 MYIO is a home automation platform (<a href="http://smarthomeninja.hu" target="_blank">MYIO home page</a>). This repository provides integration of this platform to Home Assistant.
 
