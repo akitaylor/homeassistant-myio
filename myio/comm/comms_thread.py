@@ -86,6 +86,8 @@ class CommsThread2:
         the response from the server will update the state,
         and merged to the previous database.
         """
+        _LOGGER.debug(f"Starting status update. Actual status: {server_status}")
+
         _server_name = slugify(config_entry.data[CONF_NAME])
         _host = (
             config_entry.data[CONF_HOST].replace("https://", "").replace("http://", "")
@@ -155,7 +157,9 @@ class CommsThread2:
                                     _LOGGER.debug("Invalid output.json")
                                     server_status = "Invalid"
                                     _invalid = True
-                        except:  # pylint: disable=bare-except
+                        except Exception as e:  # pylint: disable=bare-except
+                            _LOGGER.debug(f"Exception in loading output.json: {e}")
+                            _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                             if not _invalid:
                                 server_status = "Offline"
                 if server_status == "Online-1":  # add sensors key to the database
@@ -241,8 +245,9 @@ class CommsThread2:
                         _LOGGER.debug(f"Exception in loading descriptions: {e}")
                         _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
 
-            except:  # pylint: disable=bare-except
-                _LOGGER.debug("Except")
+            except Exception as e:  # pylint: disable=bare-except
+                _LOGGER.debug(f"Exception in status refresh: {e}")
+                _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                 if not _invalid:
                     server_status = "Offline"
 
@@ -345,7 +350,9 @@ class CommsThread2:
                             _LOGGER.debug("Online-sensors")
                             server_status = "Offline"
 
-            except:  # pylint: disable=bare-except
+            except Exception as e:  # pylint: disable=bare-except
+                _LOGGER.debug(f"Exception in status refresh: {e}")
+                _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                 if not _invalid:
                     server_status = "Offline"
         return [server_data, server_status]
