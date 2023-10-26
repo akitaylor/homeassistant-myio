@@ -3,7 +3,7 @@ import colorsys
 from datetime import timedelta
 import logging
 
-from myio.comms_thread import CommsThread  # pylint: disable=import-error
+from .comm.comms_thread import CommsThread2
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -28,7 +28,7 @@ RGB_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR
 #RGBW_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_WHITE_VALUE
 RELAY_FEATURES = 0
 SCAN_INTERVAL = timedelta(seconds=3)
-COMMS_THREAD = CommsThread()
+COMMS_THREAD = CommsThread2()
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):

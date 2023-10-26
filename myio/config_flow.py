@@ -1,7 +1,7 @@
 """Config flow for myIO integration."""
 import logging
 
-from myio.comms_thread import CommsThread  # pylint: disable=import-error
+from .comm.comms_thread import CommsThread2
 from slugify import slugify
 import voluptuous as vol
 
@@ -18,7 +18,7 @@ from homeassistant.core import callback
 from .const import CONF_PORT_APP, DOMAIN  # pylint:disable=unused-import
 
 _LOGGER = logging.getLogger(__name__)
-COMMS_THREAD = CommsThread()
+COMMS_THREAD = CommsThread2()
 
 CONFIG_SCHEMA = vol.Schema(
     {

@@ -2,7 +2,7 @@
 from datetime import timedelta
 import logging
 
-from myio.comms_thread import CommsThread  # pylint: disable=import-error
+from .comm.comms_thread import CommsThread2
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -23,7 +23,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 SUPPORT_FLAGS = 0
 SCAN_INTERVAL = timedelta(seconds=5)
-COMMS_THREAD = CommsThread()
+COMMS_THREAD = CommsThread2()
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):

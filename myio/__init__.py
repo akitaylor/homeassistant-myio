@@ -3,8 +3,6 @@ import asyncio
 from datetime import timedelta
 import logging
 
-from myio.comms_thread import CommsThread  # pylint: disable=import-error
-
 from homeassistant.const import CONF_NAME
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator

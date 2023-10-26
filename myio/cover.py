@@ -2,7 +2,7 @@
 from datetime import timedelta
 import logging
 
-from myio.comms_thread import CommsThread  # pylint: disable=import-error
+from .comm.comms_thread import CommsThread2
 
 from homeassistant.components.cover import (
     DEVICE_CLASS_SHADE,
@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=3)
 SUPPORTED_FEATURES = SUPPORT_OPEN | SUPPORT_CLOSE | SUPPORT_STOP
-COMMS_THREAD = CommsThread()
+COMMS_THREAD = CommsThread2()
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
