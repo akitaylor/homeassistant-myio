@@ -171,6 +171,7 @@ class MyIOCover(CoverEntity):
             server_status=self.server_status(),
             config_entry=self._config_entry,
             _post=post,
+            hass = self.hass
         )
         self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
         return True

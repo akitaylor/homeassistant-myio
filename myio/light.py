@@ -27,7 +27,7 @@ PWM_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR
 RGB_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR
 #RGBW_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_WHITE_VALUE
 RELAY_FEATURES = 0
-SCAN_INTERVAL = timedelta(seconds=3)
+SCAN_INTERVAL = timedelta(seconds=30)
 COMMS_THREAD = CommsThread2()
 
 
@@ -180,6 +180,7 @@ class MyIOlight(LightEntity):
             server_status=self.server_status(),
             config_entry=self._config_entry,
             _post=post,
+            hass = self.hass
         )
         self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
         return True

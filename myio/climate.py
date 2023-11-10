@@ -22,7 +22,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 SUPPORT_FLAGS = 0
-SCAN_INTERVAL = timedelta(seconds=5)
+SCAN_INTERVAL = timedelta(seconds=30)
 COMMS_THREAD = CommsThread2()
 
 
@@ -280,6 +280,7 @@ class MyIOThermostate(ClimateEntity):
             server_status=self.server_status(),
             config_entry=self._config_entry,
             _post=post,
+            hass = self.hass
         )
         self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
         return True

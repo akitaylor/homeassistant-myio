@@ -1,14 +1,12 @@
 """This is a communicaton class to myIO-Server."""
-import logging
-import aiohttp
-import json
 import asyncio
 import base64
-import traceback
+import json
+import logging
 import sys
+import traceback
 
-from slugify import slugify
-
+import requests
 from homeassistant.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -16,6 +14,8 @@ from homeassistant.const import (
     CONF_NAME,
     CONF_PORT,
 )
+from slugify import slugify
+
 from .const import CONF_PORT_APP
 
 _DESCRIPTIONS = {
@@ -31,11 +31,38 @@ _SENSORS = {
 }
 
 _LOGGER = logging.getLogger(__name__)
-_TIMEOUT = aiohttp.ClientTimeout(total=5)
+
+_LOGGER.debug("Loading CommsThread2 (v1.9b1)")
+
+
+class Object(object):
+    pass
 
 
 class CommsThread2:
     """CommsThread can poll data from myIO Server, and send post to it"""
+
+    async def tcp_echo_client(_self, message, host, port):
+        """ this code opens a socket to the host, send the message
+        and returns the response
+        """
+        _LOGGER.debug(f"TCP echo: {message}, {host}, {port}")
+        fut = asyncio.open_connection(host, port)
+        try:  # Wait for 3 seconds, then raise TimeoutError
+            reader, writer = await asyncio.wait_for(fut, timeout=10)
+
+            writer.write(message.encode())
+            await writer.drain()
+
+            data = await reader.read()
+            # _LOGGER.debug("Received: %s", data.decode())
+
+            writer.close()
+            await writer.wait_closed()
+            return data.decode()
+        except:
+            _LOGGER.debug("validation - TCP echo")
+            _LOGGER.debug(f"Exception in TCP echo: {traceback.format_exception(*sys.exc_info())}")
 
     async def validate(self, host, port, app_port, name, password):
         """this function checks if the parameters are valid"""
@@ -45,49 +72,33 @@ class CommsThread2:
         _host = host.replace("https://", "").replace("http://", "")
         message = "cannot_connect"
 
-        async def tcp_echo_client(message, port):
-            """ this code opens a socket to the host, send the message
-            and returns the response
-            """
-            fut = asyncio.open_connection(_host, port)
-            try:  # Wait for 3 seconds, then raise TimeoutError
-                reader, writer = await asyncio.wait_for(fut, timeout=3)
-            except asyncio.TimeoutError:
-                _LOGGER.debug("Timeout, skipping")
-
-            writer.write(message.encode())
-            await writer.drain()
-
-            data = await reader.read()
-            #_LOGGER.debug("Received: %s", data.decode())
-
-            writer.close()
-            await writer.wait_closed()
-            return data.decode()
-
+        _LOGGER.debug("Running validation query")
         try:
-            response = await tcp_echo_client(
-                f"GET /relay.json HTTP/1.1\nAuthorization: Basic {_encoded.decode()}\n\n",
-                port,
+            response = await self.tcp_echo_client(
+                f"GET /relay.json HTTP/1.1\r\nAuthorization: Basic {_encoded.decode()}\r\n", _host, port
             )
             message = "app_port_problem"
-            response = await tcp_echo_client(f"{_encoded.decode()}\n?R\n", app_port)
-            message = "ok"
+            response = await self.tcp_echo_client(f"{_encoded.decode()}\n?R\n", _host, app_port)
+
             if response == ("." or "!"):
                 message = "invalid_auth"
+            else:
+                message = "ok"
 
         except:  # pylint: disable=bare-except
-            _LOGGER.debug("valid - Except")
+            _LOGGER.debug("validation - Except")
+            _LOGGER.debug(f"Exception in validation call: {traceback.format_exception(*sys.exc_info())}")
 
         return message
 
-    async def send(self, server_data, server_status, config_entry, _post):
+    async def send(self, server_data, server_status, config_entry, _post, hass):
         """this function of CommsThread can send a post request to the myIO server,
         the response from the server will update the state,
         and merged to the previous database.
         """
-        _LOGGER.debug(f"Starting status update. Actual status: {server_status}")
-
+        _LOGGER.debug(f"Send is called")
+        # for key in config_entry.data:
+        #     _LOGGER.debug(f"Send - config: {key}: {config_entry.data[key]}")
         _server_name = slugify(config_entry.data[CONF_NAME])
         _host = (
             config_entry.data[CONF_HOST].replace("https://", "").replace("http://", "")
@@ -104,69 +115,40 @@ class CommsThread2:
         if not _host_with_http.startswith("http://"):
             _host_with_http = f"http://{_host_with_http}"
 
-        authenticate = aiohttp.BasicAuth(
-            config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD],
-        )
+        def call_http(uri, data):
+            try:
+                _LOGGER.debug(f"Starting HTTP request: {uri}")
+                res = requests.get(url=f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}",
+                                   auth=(config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD]), data=data,
+                                   timeout=10)
+                _LOGGER.debug(f"HTTP response: status={res.status_code}, length={len(res.text)}")
+                return res
+            except:
+                _LOGGER.debug(f"Exception in HTTP request: {traceback.format_exception(*sys.exc_info())}")
+                res = Object()
+                res.status_code = -1
+                return res
 
-        async def tcp_echo_client(message, port):
-            """ this code opens a socket to the host, send the message
-            and returns the response
-            """
-            reader, writer = await asyncio.open_connection(_host, port)
-
-            writer.write(message.encode())
-            await writer.drain()
-
-            data = await reader.read()
-            # _LOGGER.debug("Received: %s", data.decode())
-
-            writer.close()
-            await writer.wait_closed()
-            return data.decode()
-
+        _LOGGER.debug(f"Server status: {server_status}")
         if not server_status.startswith("Online"):
             try:  # try build the server_data dictionary
-                async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                    try:  # try to get sens_out.json
-                        async with session.get(
-                            f"{_host_with_http}/sens_out.json",
-                            auth=authenticate,
-                            data=_post,
-                        ) as response:
-                            if response.status == 200:
-                                server_data = json.loads(await response.text())
-                                server_status = "Online-2"
-                            else:
-                                _LOGGER.debug("Invalid sens_out.json")
-                                server_status = "Invalid"
-                                _invalid = True
-                    except:  # pylint: disable=bare-except
-                        try:  # try to get output.json
-                            async with session.get(
-                                f"{_host_with_http}/output.json",
-                                auth=authenticate,
-                                data=_post,
-                            ) as response:
-                                if response.status == 200:
-                                    server_data = json.loads(await response.text())
-                                    if server_data.get("relay") is not None:
-                                        # repair database key relay->relays
-                                        server_data["relays"] = server_data.pop("relay")
-                                    server_status = "Online-1"
-                                else:
-                                    _LOGGER.debug("Invalid output.json")
-                                    server_status = "Invalid"
-                                    _invalid = True
-                        except Exception as e:  # pylint: disable=bare-except
-                            _LOGGER.debug(f"Exception in loading output.json: {e}")
-                            _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
-                            if not _invalid:
-                                server_status = "Offline"
+                _LOGGER.debug(f"Server status not online, building data dictionary")
+                res = await hass.async_add_executor_job(call_http, "sens_out.json", _post)
+                _LOGGER.debug(f"HTTP result: {res.status_code}")
+                if res.status_code == 200:
+                    response_body = res.text
+                    _LOGGER.debug(f"Response length: {len(response_body)}")
+                    server_data = json.loads(response_body)
+                    server_status = "Online-2"
+                else:
+                    server_status = "Invalid"
+                    _invalid = True
+
                 if server_status == "Online-1":  # add sensors key to the database
                     server_data["sensors"] = {}
                     for sensor in _SENSORS:
-                        response = await tcp_echo_client(
-                            f"{_encoded.decode()}\n?{sensor}\n", _port_app
+                        response = await self.tcp_echo_client(
+                            f"{_encoded.decode()}\n?{sensor}\n\n", _host, _port_app
                         )
                         _length = len(response)
                         if _length > 6:
@@ -199,20 +181,29 @@ class CommsThread2:
                                 ] = int(_temp_json[element])
                                 _id = _id + 1
 
+                _LOGGER.debug(f"Server_data printing...")
+                for k in server_data:
+                    _LOGGER.debug(f"Server_data[{k}]= {server_data[k]}")
+                _LOGGER.debug(f"Server_data end.")
+
                 for desc in _DESCRIPTIONS:  # try to add descriptions from xml files
+                    _LOGGER.debug(f"Getting server_data {desc}")
+                    _LOGGER.debug(f"Getting _DESCRIPTIONS[desc] = {_DESCRIPTIONS[desc]}")
                     _desc_data = server_data[_DESCRIPTIONS[desc]]
                     for element in _desc_data:
                         if _desc_data[element].get("description", -1) == -1:
                             _desc_data[element]["description"] = ""
 
+                    _LOGGER.debug(f"Calling description query for '{desc}'")
+                    message = f"GET /{desc}_desc.xml HTTP/1.1\nAuthorization: Basic {_encoded.decode()}\n\n"
                     try:
-                        response = await tcp_echo_client(
-                            f"GET /{desc}_desc.xml HTTP/1.1\nAuthorization: Basic {_encoded.decode()}\n\n",
-                            _port_http,
+                        _LOGGER.debug(f"Desc query: message={message}")
+                        _LOGGER.debug(f"Desc query: _port_http={_port_http}")
+                        response = await self.tcp_echo_client(
+                            message,
+                            _host,
+                            _port_http
                         )
-
-                        _LOGGER.debug(f"Sensors '{desc}' response:")
-                        _LOGGER.debug(response)
 
                         if len(response) > 0:
                             # convert xml data to _temp_json
@@ -241,118 +232,124 @@ class CommsThread2:
                                         ]
                                         break
                             server_data[_DESCRIPTIONS[desc]] = _desc_data.copy()
-                    except Exception as e:  # pylint: disable=bare-except
-                        _LOGGER.debug(f"Exception in loading descriptions: {e}")
-                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                    except:  # pylint: disable=bare-except
+                        if not _invalid:
+                            _LOGGER.debug(f"Descriptions - exception - message: {message}")
+                            _LOGGER.debug(
+                                f"Descriptions query: An error occurred: {traceback.format_exception(*sys.exc_info())}")
 
             except Exception as e:  # pylint: disable=bare-except
-                _LOGGER.debug(f"Exception in status refresh: {e}")
+                _LOGGER.debug(f"Exception in send: {e}")
                 _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                 if not _invalid:
                     server_status = "Offline"
 
         else:  # if server was online
             try:
-                async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                    if server_status == "Online-2":
-                        try:  # try to get sens_out.json
-                            async with session.get(
-                                f"{_host_with_http}/sens_out.json",
-                                auth=authenticate,
-                                data=_post,
-                            ) as response:
-                                if response.status == 200:
-                                    _temp_data = server_data
-                                    _temp_json = json.loads(await response.text())
-                                    # Merge fresh server status to server_data
-                                    for key in _temp_data:
-                                        for number in _temp_data[key]:
-                                            _temp_data[key][number].update(
-                                                _temp_json[key][number]
-                                            )
-                                    server_data = _temp_data.copy()
-                                else:
-                                    _LOGGER.debug("Invalid")
-                                    server_status = "Invalid"
-                                    _invalid = True
-                        except Exception as e:  # pylint: disable=bare-except
-                            _LOGGER.debug(f"Exception in loading sens_out.json: {e}")
-                            _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
-                            if not _invalid:
-                                server_status = "Offline"
+                if server_status == "Online-2":
+                    try:  # try to get sens_out.json
+                        _LOGGER.debug("Online-2 data refresh started")
+                        res = await hass.async_add_executor_job(call_http, "sens_out.json", _post)
+                        _LOGGER.debug(f"HTTP result: {res.status_code}")
+                        if res.status_code == 200:
+                            body = res.text
+                            _LOGGER.debug(f"Response length: {len(body)}")
 
-                    else:
-                        try:  # try to get output.json
-                            async with session.get(
-                                f"{_host_with_http}/output.json",
-                                auth=authenticate,
-                                data=_post,
-                            ) as response:
-                                if response.status == 200:
-                                    _temp_data = server_data
-                                    _temp_json = json.loads(await response.text())
-                                    if _temp_json.get("relay") != None:
-                                        # repair database key relay->relays
-                                        _temp_json["relays"] = _temp_json.pop("relay")
-                                    # Merge fresh server status to server_data
-                                    for key in _temp_data:
-                                        if key != "sensors":
-                                            for number in _temp_data[key]:
-                                                _temp_data[key][number].update(
-                                                    _temp_json[key][number]
-                                                )
-                                    server_data = _temp_data.copy()
-                                else:
-                                    _LOGGER.debug("Invalid output.json")
-                                    server_status = "Invalid"
-                                    _invalid = True
-                        except:  # pylint: disable=bare-except
-                            _LOGGER.debug("except Online-output.json")
+                            # Merge fresh server status to server_data
+                            _temp_data = server_data
+                            _temp_json = json.loads(body)
+                            for key in _temp_data:
+                                for number in _temp_data[key]:
+                                    _temp_data[key][number].update(
+                                        _temp_json[key][number]
+                                    )
+                            server_data = _temp_data.copy()
+                        else:
+                            server_status = "Invalid"
+                            _invalid = True
+                    except Exception as e:  # pylint: disable=bare-except
+                        _LOGGER.debug(f"Exception in sens_out.json: {e}")
+                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                        if not _invalid:
                             server_status = "Offline"
-                        try:
-                            # try to get sensors datas
-                            for sensor in _SENSORS:
-                                response = await tcp_echo_client(
-                                    f"{_encoded.decode()}\n?{sensor}\n", _port_app
-                                )
-                                _length = len(response)
-                                if _length > 6:
-                                    response = response.replace(sensor, '{"')
-                                    response = response.replace("=", '":"')
-                                    response = response.replace(";", '","')
-                                    _list = list(response)
-                                    _length = len(_list)
-                                    _list = list(response)
-                                    _list[_length - 4] = "}"
-                                    _list[_length - 3] = " "
-                                    _list[_length - 2] = " "
-                                    _list[_length - 1] = " "
-                                    response = "".join(_list)
-                                    _temp_json = json.loads(response)
-                                    _mod = 0
-                                    _id = 0
+
+                else:
+                    try:  # try to get output.json
+                        _LOGGER.debug("Online-1 data refresh started")
+                        res = await hass.async_add_executor_job(call_http, "output.json", _post)
+                        _LOGGER.debug(f"HTTP result: {res.status_code}")
+                        if res.status_code == 200:
+                            body = res.text
+                            _LOGGER.debug(f"Response length: {len(body)}")
+                            _temp_data = server_data
+                            _temp_json = json.loads(body)
+                            if _temp_json.get("relay") != None:
+                                # repair database key relay->relays
+                                _temp_json["relays"] = _temp_json.pop("relay")
+                            # Merge fresh server status to server_data
+                            for key in _temp_data:
+                                if key != "sensors":
+                                    for number in _temp_data[key]:
+                                        _temp_data[key][number].update(
+                                            _temp_json[key][number]
+                                        )
+                            server_data = _temp_data.copy()
+                        else:
+                            _LOGGER.debug("Invalid output.json")
+                            server_status = "Invalid"
+                            _invalid = True
+                    except Exception as e:  # pylint: disable=bare-except
+                        _LOGGER.debug("except Online-output.json")
+                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                        server_status = "Offline"
+                    try:
+                        # try to get sensors datas
+                        for sensor in _SENSORS:
+                            response = await self.tcp_echo_client(
+                                f"{_encoded.decode()}\n?{sensor}\n\n",
+                                _host,
+                                _port_app
+                            )
+                            _length = len(response)
+                            if _length > 6:
+                                response = response.replace(sensor, '{"')
+                                response = response.replace("=", '":"')
+                                response = response.replace(";", '","')
+                                _list = list(response)
+                                _length = len(_list)
+                                _list = list(response)
+                                _list[_length - 4] = "}"
+                                _list[_length - 3] = " "
+                                _list[_length - 2] = " "
+                                _list[_length - 1] = " "
+                                response = "".join(_list)
+                                _temp_json = json.loads(response)
+                                _mod = 0
+                                _id = 0
+                                if sensor == "H":
+                                    _mod = 101
+                                for element in _temp_json:
+                                    __id = 0
+                                    if sensor == "T":
+                                        __id = int(element)
                                     if sensor == "H":
-                                        _mod = 101
-                                    for element in _temp_json:
-                                        __id = 0
-                                        if sensor == "T":
-                                            __id = int(element)
-                                        if sensor == "H":
-                                            __id = _id + _mod
-                                        server_data["sensors"][str(_id + _mod)][
-                                            "id"
-                                        ] = __id
-                                        server_data["sensors"][str(_id + _mod)][
-                                            _SENSORS[sensor]
-                                        ] = int(_temp_json[element])
-                                        _id = _id + 1
-                        except:  # pylint: disable=bare-except
-                            _LOGGER.debug("Online-sensors")
-                            server_status = "Offline"
+                                        __id = _id + _mod
+                                    server_data["sensors"][str(_id + _mod)][
+                                        "id"
+                                    ] = __id
+                                    server_data["sensors"][str(_id + _mod)][
+                                        _SENSORS[sensor]
+                                    ] = int(_temp_json[element])
+                                    _id = _id + 1
+                    except Exception as e:  # pylint: disable=bare-except
+                        _LOGGER.debug("Online-sensors exception")
+                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                        server_status = "Offline"
 
             except Exception as e:  # pylint: disable=bare-except
-                _LOGGER.debug(f"Exception in status refresh: {e}")
+                _LOGGER.debug(f"Exception in sens_out.json: {e}")
                 _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
                 if not _invalid:
                     server_status = "Offline"
+        _LOGGER.debug(f"MYIO setup finished: {server_status}")
         return [server_data, server_status]

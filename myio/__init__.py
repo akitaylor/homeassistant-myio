@@ -8,7 +8,7 @@ from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
 
-from .const import CLIMATE, CONF_REFRESH_TIME, COVER, DOMAIN, LIGHT, SENSOR, DEFAULT_REFRESH_TIME
+from .const import CLIMATE, CONF_REFRESH_TIME, COVER, DOMAIN, LIGHT, SENSOR
 from .comm.comms_thread import CommsThread2
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,11 +42,7 @@ async def async_setup_entry(hass, config_entry):
     hass.states.async_set(f"{_server_name}.state", "Offline")
     hass.states.async_set(f"{_server_name}.first_contact", "True")
 
-    _refresh_timer = config_entry.options.get(CONF_REFRESH_TIME, DEFAULT_REFRESH_TIME)
-
-    _LOGGER.debug("MYIO Config:")
-    for key in config_entry.options:
-        _LOGGER.debug(f"{key}: {config_entry.options(key)}")
+    _refresh_timer = config_entry.options.get(CONF_REFRESH_TIME, 6)
 
     def server_data():
         """Return the server data dictionary database."""
@@ -69,14 +65,14 @@ async def async_setup_entry(hass, config_entry):
         """Fetch data from API endpoint."""
 
         was_offline = False
-        _timeout = 4
+        _timeout = 30
         _comms_thread_timeout = False
         _temp_server_state = hass.states.get(f"{_server_name}.state").state
 
         if _temp_server_state == "Offline":
             hass.states.async_set(f"{_server_name}.available", False)
             was_offline = True
-            _timeout = 20
+            _timeout = 30
 
         # Pull fresh data from server.
         try:
@@ -88,7 +84,8 @@ async def async_setup_entry(hass, config_entry):
                     server_data=server_data(),
                     server_status=_temp_server_state,
                     config_entry=config_entry,
-                    _post=None
+                    _post=None,
+                    hass = hass
                 ),
                 timeout=_timeout,
             )
