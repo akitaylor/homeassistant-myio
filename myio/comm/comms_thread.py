@@ -120,14 +120,23 @@ class CommsThread2:
                 _LOGGER.debug(f"Starting HTTP request: {uri}")
                 res = requests.get(url=f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}",
                                    auth=(config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD]), data=data,
-                                   timeout=10)
+                                   timeout=5)
                 _LOGGER.debug(f"HTTP response: status={res.status_code}, length={len(res.text)}")
                 return res
             except:
-                _LOGGER.debug(f"Exception in HTTP request: {traceback.format_exception(*sys.exc_info())}")
-                res = Object()
-                res.status_code = -1
-                return res
+                try:
+                    _LOGGER.debug(f"Retrying HTTP request: {uri}")
+                    res = requests.get(url=f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}",
+                                       auth=(config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD]), data=data,
+                                       timeout=5)
+                    _LOGGER.debug(f"HTTP response: status={res.status_code}, length={len(res.text)}")
+                    _LOGGER.debug(f"HTTP response: {res}")
+                    return res
+                except:
+                    _LOGGER.debug(f"Exception in HTTP request: {traceback.format_exception(*sys.exc_info())}")
+                    res = Object()
+                    res.status_code = -1
+                    return res
 
         _LOGGER.debug(f"Server status: {server_status}")
         if not server_status.startswith("Online"):
