@@ -2,7 +2,7 @@
 
 MYIO is a home automation platform (<a href="http://smarthomeninja.hu" target="_blank">MYIO home page</a>). This repository provides integration of this platform to Home Assistant.
 
-Latest tested Home Assistant version: <b>2023.12.3</b>
+Latest tested Home Assistant version: <b>2024.4</b>
 
 ## License
 
