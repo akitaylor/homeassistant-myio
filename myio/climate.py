@@ -162,6 +162,9 @@ class MyIOThermostate(ClimateEntity):
             self._current_temperature = (
                 self._server_data["sensors"][str(self._sensor)]["hum"] / 10
             )
+        else:
+            logging.error(f"Unknown sensor value in climate.py init: {self._sensor}")
+
         # Initialize the climate device.
         self._unique_id = _id
         self._name = self._server_data[self._output][str(self._id - self._id_mod)][
