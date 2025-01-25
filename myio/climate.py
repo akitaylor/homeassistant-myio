@@ -8,14 +8,14 @@ from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
-    CURRENT_HVAC_COOL,
-    CURRENT_HVAC_HEAT,
-    CURRENT_HVAC_IDLE,
-    HVAC_MODE_COOL,
-    HVAC_MODE_HEAT,
-    SUPPORT_TARGET_TEMPERATURE_RANGE,
+    DEFAULT_MIN_TEMP,
+    DEFAULT_MAX_TEMP,
+    ClimateEntityFeature,
 )
-from homeassistant.const import CONF_NAME, TEMP_CELSIUS
+from homeassistant.components.climate.const import HVACAction
+from homeassistant.components.climate.const import HVACMode
+from homeassistant.const import CONF_NAME
+from homeassistant.const import UnitOfTemperature
 from homeassistant.util import slugify
 
 from .const import DOMAIN
@@ -114,49 +114,53 @@ class MyIOThermostate(ClimateEntity):
             / 10
         )
 
+        self._min_temp = DEFAULT_MIN_TEMP
+        self._max_temp = DEFAULT_MAX_TEMP
+
         """Set hvac_mode if it is in cool or heat mode."""
-        self._hvac_modes = [HVAC_MODE_COOL, HVAC_MODE_HEAT]
+        self._hvac_modes = [HVACMode.COOL, HVACMode.HEAT]
         if self._sensor_off > self._sensor_on:
-            self._hvac_mode = HVAC_MODE_HEAT
+            self._hvac_mode = HVACMode.HEAT
         else:
-            self._hvac_mode = HVAC_MODE_COOL
-        if self._hvac_mode == HVAC_MODE_HEAT:
+            self._hvac_mode = HVACMode.COOL
+        if self._hvac_mode == HVACMode.HEAT:
             self._target_temperature_high = self._sensor_off
             self._target_temperature_low = self._sensor_on
-            self._min_temp = (self._sensor_off + self._sensor_on) / 2 - (
-                self._sensor_off - self._sensor_on
-            )
-            self._max_temp = (self._sensor_off + self._sensor_on) / 2 + (
-                self._sensor_off - self._sensor_on
-            )
-            if self._min_temp + 1 > self._sensor_on:
-                self._min_temp = self._sensor_on - 1
-            if self._max_temp - 1 < self._sensor_off:
-                self._max_temp = self._sensor_off + 1
+            # self._min_temp = (self._sensor_off + self._sensor_on) / 2 - (
+            #     self._sensor_off - self._sensor_on
+            # )
+            # self._max_temp = (self._sensor_off + self._sensor_on) / 2 + (
+            #     self._sensor_off - self._sensor_on
+            # )
+            # if self._min_temp + 1 > self._sensor_on:
+            #     self._min_temp = self._sensor_on - 1
+            # if self._max_temp - 1 < self._sensor_off:
+            #     self._max_temp = self._sensor_off + 1
         else:
             self._target_temperature_high = self._sensor_on
             self._target_temperature_low = self._sensor_off
-            self._min_temp = (self._sensor_off + self._sensor_on) / 2 - (
-                self._sensor_on - self._sensor_off
-            )
-            self._max_temp = (self._sensor_off + self._sensor_on) / 2 + (
-                self._sensor_on - self._sensor_off
-            )
-        if self._state != 0 and self._hvac_mode == HVAC_MODE_HEAT:
-            self._hvac_action = CURRENT_HVAC_HEAT
-        if self._state != 0 and self._hvac_mode == HVAC_MODE_COOL:
-            self._hvac_action = CURRENT_HVAC_COOL
+            # self._min_temp = (self._sensor_off + self._sensor_on) / 2 - (
+            #     self._sensor_on - self._sensor_off
+            # )
+            # self._max_temp = (self._sensor_off + self._sensor_on) / 2 + (
+            #     self._sensor_on - self._sensor_off
+            # )
+        if self._state != 0 and self._hvac_mode == HVACMode.HEAT:
+            self._hvac_action = HVACAction.HEATING
+        if self._state != 0 and self._hvac_mode == HVACMode.COOL:
+            self._hvac_action = HVACAction.COOLING
         if self._state == 0:
-            self._hvac_action = CURRENT_HVAC_IDLE
+            self._hvac_action = HVACAction.IDLE
+
         if int(self._sensor) <= 100:
-            self._unit_of_measurement = TEMP_CELSIUS
+            self._unit_of_measurement = UnitOfTemperature.CELSIUS
             self._target_temperature_step = 0.1
             self._precision = 0.1
             self._current_temperature = (
                 self._server_data["sensors"][self._sensor]["temp"] / 100
             )
         elif int(self._sensor) <= 200:
-            self._unit_of_measurement = TEMP_CELSIUS
+            self._unit_of_measurement = UnitOfTemperature.CELSIUS
             self._target_temperature_step = 1
             self._precision = 1
             self._current_temperature = (
@@ -172,7 +176,7 @@ class MyIOThermostate(ClimateEntity):
         ]
         # define SUPPORT_FLAGS
         self._support_flags = SUPPORT_FLAGS
-        self._support_flags = self._support_flags | SUPPORT_TARGET_TEMPERATURE_RANGE
+        self._support_flags = self._support_flags | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
 
     @property
     def should_poll(self) -> bool:
@@ -298,7 +302,7 @@ class MyIOThermostate(ClimateEntity):
             self._target_temperature_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
             _string_on = ""
             _string_off = ""
-            if self._hvac_mode == HVAC_MODE_HEAT:
+            if self._hvac_mode == HVACMode.HEAT:
                 if self._output == "relays":
                     _string_on = "min_temp_ON"
                     _string_off = "max_temp_OFF"
@@ -348,10 +352,10 @@ class MyIOThermostate(ClimateEntity):
                 self._id - self._id_mod)]["sensorOFF"]
             > self._server_data[self._output][str(self._id - self._id_mod)]["sensorON"]
         ):
-            self._hvac_mode = HVAC_MODE_HEAT
+            self._hvac_mode = HVACMode.HEAT
         else:
-            self._hvac_mode = HVAC_MODE_COOL
-        if self._hvac_mode == HVAC_MODE_HEAT:
+            self._hvac_mode = HVACMode.COOL
+        if self._hvac_mode == HVACMode.HEAT:
             self._target_temperature_low = (
                 self._server_data[self._output][str(self._id - self._id_mod)][
                     "sensorON"
@@ -364,7 +368,7 @@ class MyIOThermostate(ClimateEntity):
                 ]
                 / 10
             )
-        if self._hvac_mode == HVAC_MODE_COOL:
+        if self._hvac_mode == HVACMode.COOL:
             self._target_temperature_low = (
                 self._server_data[self._output][str(self._id - self._id_mod)][
                     "sensorOFF"
@@ -377,23 +381,24 @@ class MyIOThermostate(ClimateEntity):
                 ]
                 / 10
             )
-        self._min_temp = (
-            self._target_temperature_high + self._target_temperature_low
-        ) / 2 - (self._target_temperature_high - self._target_temperature_low)
-        self._max_temp = (
-            self._target_temperature_high + self._target_temperature_low
-        ) / 2 + (self._target_temperature_high - self._target_temperature_low)
+        # self._min_temp = (
+        #     self._target_temperature_high + self._target_temperature_low
+        # ) / 2 - (self._target_temperature_high - self._target_temperature_low)
+        # self._max_temp = (
+        #     self._target_temperature_high + self._target_temperature_low
+        # ) / 2 + (self._target_temperature_high - self._target_temperature_low)
+        #
+        # if self._min_temp + 1 > self._target_temperature_low:
+        #     self._min_temp = self._target_temperature_low - 1
+        # if self._max_temp - 1 < self._target_temperature_high:
+        #     self._max_temp = self._target_temperature_high + 1
 
-        if self._min_temp + 1 > self._target_temperature_low:
-            self._min_temp = self._target_temperature_low - 1
-        if self._max_temp - 1 < self._target_temperature_high:
-            self._max_temp = self._target_temperature_high + 1
-
-        if self._state != 0 and self._hvac_mode == HVAC_MODE_HEAT:
-            self._hvac_action = CURRENT_HVAC_HEAT
-        if self._state != 0 and self._hvac_mode == HVAC_MODE_COOL:
-            self._hvac_action = CURRENT_HVAC_COOL
+        if self._state != 0 and self._hvac_mode == HVACMode.HEAT:
+            self._hvac_action = HVACAction.HEATING
+        if self._state != 0 and self._hvac_mode == HVACMode.COOL:
+            self._hvac_action = HVACAction.COOLING
         if self._state == 0:
-            self._hvac_action = CURRENT_HVAC_IDLE
+            self._hvac_action = HVACAction.IDLE
+
 
         self.schedule_update_ha_state()

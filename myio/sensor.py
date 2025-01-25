@@ -2,7 +2,8 @@
 from datetime import timedelta
 import logging
 
-from homeassistant.const import CONF_NAME, PERCENTAGE, TEMP_CELSIUS
+from homeassistant.const import CONF_NAME, PERCENTAGE
+from homeassistant.const import UnitOfTemperature
 from homeassistant.helpers.entity import Entity
 from homeassistant.util import slugify
 
@@ -87,7 +88,7 @@ class MyIOSensor(Entity):
     def unit_of_measurement(self):
         """Return the unit of measurement."""
         if int(self._number) < 100:
-            string_to_send = TEMP_CELSIUS
+            string_to_send = UnitOfTemperature.CELSIUS
         elif int(self._number) < 200:
             string_to_send = PERCENTAGE
         else:
