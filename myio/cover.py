@@ -5,12 +5,10 @@ import logging
 from .comm.comms_thread import CommsThread2
 
 from homeassistant.components.cover import (
-    DEVICE_CLASS_SHADE,
+    CoverDeviceClass,
     STATE_CLOSING,
     STATE_OPENING,
-    SUPPORT_CLOSE,
-    SUPPORT_OPEN,
-    SUPPORT_STOP,
+    CoverEntityFeature,
     CoverEntity,
 )
 from homeassistant.const import CONF_NAME
@@ -21,7 +19,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=3)
-SUPPORTED_FEATURES = SUPPORT_OPEN | SUPPORT_CLOSE | SUPPORT_STOP
+SUPPORTED_FEATURES = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
 COMMS_THREAD = CommsThread2()
 
 
@@ -94,7 +92,7 @@ class MyIOCover(CoverEntity):
         self._is_closing = False
         self._available = True
         self._supported_features = SUPPORTED_FEATURES
-        self._device_class = DEVICE_CLASS_SHADE
+        self._device_class = CoverDeviceClass.SHADE
         self._position = 50
 
     @property
