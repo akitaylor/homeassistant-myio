@@ -1,32 +1,22 @@
 """myIO light platform that implements relays and pwms, what don't have sensor driver."""
 import colorsys
-from datetime import timedelta
 import logging
-
-from .comm.comms_thread import CommsThread2
+from datetime import timedelta
 
 from homeassistant.components.light import (
-    ATTR_BRIGHTNESS,
-    ATTR_HS_COLOR,
-    #ATTR_WHITE_VALUE,
-    SUPPORT_BRIGHTNESS,
-    SUPPORT_COLOR,
-    #SUPPORT_WHITE_VALUE,
+    ColorMode,
     LightEntity,
 )
-from homeassistant.const import CONF_NAME
+from homeassistant.const import ATTR_BRIGHTNESS, CONF_NAME
 from homeassistant.util import slugify
 
+from .comm.comms_thread import CommsThread2
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 LIGHT_EFFECT_LIST = ["none"]
 
-PWM_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR
-RGB_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR
-#RGBW_FEATURES = SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_WHITE_VALUE
-RELAY_FEATURES = 0
 SCAN_INTERVAL = timedelta(seconds=30)
 COMMS_THREAD = CommsThread2()
 
@@ -81,27 +71,28 @@ class MyIOlight(LightEntity):
         self.entity_id = f"light.{_server_name}_{self._id}"
         self._state = 0
         self._name = ""
-        self._supported_features = ""
+        self._effect_list = LIGHT_EFFECT_LIST
 
         if _id <= 64:
             self._state = self._server_data["relays"][str(
                 self._id - 1)]["state"] * 255
             self._name = self._server_data["relays"][str(
                 self._id - 1)]["description"]
-            self._supported_features = RELAY_FEATURES
-            self._effect_list = LIGHT_EFFECT_LIST
+            # Relay only supports on/off
+            self._attr_supported_color_modes = {ColorMode.ONOFF}
+            self._attr_color_mode = ColorMode.ONOFF
         if _id >= 100:
             self._state = self._server_data["PWM"][str(
                 self._id - 101)]["state"]
             self._name = self._server_data["PWM"][str(
                 self._id - 101)]["description"]
-            self._effect_list = LIGHT_EFFECT_LIST
-            self._supported_features = PWM_FEATURES
+            # PWM supports brightness and color
+            self._attr_supported_color_modes = {ColorMode.HS, ColorMode.BRIGHTNESS}
+            self._attr_color_mode = ColorMode.HS
 
         self._unique_id = _id
         self._hs_color = None
         self._brightness = self._state
-        #self._white = 255
         self._available = True
 
     @property
@@ -148,19 +139,9 @@ class MyIOlight(LightEntity):
         return self._hs_color
 
     @property
-    def white_value(self) -> int:
-        """Return the white value of this light between 0..255."""
-        return self._white
-
-    @property
     def is_on(self) -> bool:
         """Return true if light is on."""
         return self._state
-
-    @property
-    def supported_features(self) -> int:
-        """Flag supported features."""
-        return self._supported_features
 
     def server_status(self):
         """Return the server status."""
@@ -189,12 +170,10 @@ class MyIOlight(LightEntity):
         """Turn the light on."""
         self._state = True
 
-        if ATTR_HS_COLOR in kwargs:
-            self._hs_color = kwargs[ATTR_HS_COLOR]
+        if "hs_color" in kwargs:
+            self._hs_color = kwargs["hs_color"]
         if ATTR_BRIGHTNESS in kwargs:
             self._brightness = kwargs[ATTR_BRIGHTNESS]
-        #if ATTR_WHITE_VALUE in kwargs:
-        #    self._white = kwargs[ATTR_WHITE_VALUE]
 
         if self._id <= 64:
             await self.send_post(f"r_ON={self._id}")
@@ -233,7 +212,7 @@ class MyIOlight(LightEntity):
 
     @property
     def scan_interval(self):
-        """Return the unique id."""
+        """Return the scan interval."""
         return SCAN_INTERVAL
 
 
@@ -252,7 +231,10 @@ class MyIOlightRGBW(LightEntity):
         self._id = self._group["id"]
         self.entity_id = f"light.{_server_name}_{self._id}"
         self._name = self._group["description"]
-        self._supported_features = RGB_FEATURES
+        
+        # Set proper color modes
+        self._attr_supported_color_modes = {ColorMode.HS}
+        self._attr_color_mode = ColorMode.HS
 
         self._red_lights = []
         self._green_lights = []
@@ -291,12 +273,6 @@ class MyIOlightRGBW(LightEntity):
                     self._blue_value = _pwm_unit["state"]
                     if self._blue_value != 0:
                         self._state = True
-                #elif _element_d.startswith("W") and 100 < _element < 200:
-                    #self._white_lights.append(_element)
-                    #self._white_value = _pwm_unit["state"]
-                    #if self._white_value != 0:
-                    #    self._state = True
-                    #self._supported_features = RGBW_FEATURES
             except (ValueError, Exception):  # pylint: disable=broad-except
                 continue
 
@@ -306,7 +282,6 @@ class MyIOlightRGBW(LightEntity):
         )
         self._brightness = self._hsb_values[2]
         self._hs_color = [self._hsb_values[0], self._hsb_values[1]]
-        self._white = self._white_value
         self._unique_id = int(_group) + 501
         self._available = True
 
@@ -352,19 +327,9 @@ class MyIOlightRGBW(LightEntity):
         return self._hs_color
 
     @property
-    def white_value(self) -> int:
-        """Return the white value of this light between 0..255."""
-        return self._white
-
-    @property
     def is_on(self) -> bool:
         """Return true if light is on."""
         return self._state
-
-    @property
-    def supported_features(self) -> int:
-        """Flag supported features."""
-        return self._supported_features
 
     def server_status(self):
         """Return the server status."""
@@ -391,13 +356,12 @@ class MyIOlightRGBW(LightEntity):
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the light on."""
         self._state = True
-        self._white_value = self._white
-        if ATTR_HS_COLOR in kwargs:
-            self._hs_color = kwargs[ATTR_HS_COLOR]
+        
+        if "hs_color" in kwargs:
+            self._hs_color = kwargs["hs_color"]
         if ATTR_BRIGHTNESS in kwargs:
             self._brightness = kwargs[ATTR_BRIGHTNESS]
-        #if ATTR_WHITE_VALUE in kwargs:
-        #    self._white = kwargs[ATTR_WHITE_VALUE]
+            
         # make RGB values from HSB color
         _rgb_values = colorsys.hsv_to_rgb(
             self._hs_color[0] / 360, self._hs_color[1] /
@@ -411,8 +375,7 @@ class MyIOlightRGBW(LightEntity):
             _post += f"fet*{pwm-100}={int(_rgb_values[1]*255)}&"
         for pwm in self._blue_lights:
             _post += f"fet*{pwm-100}={int(_rgb_values[2]*255)}&"
-        #for pwm in self._white_lights:
-        #    _post += f"fet*{pwm-100}={self._white}&"
+            
         # send the post to the myIO server
         await self.send_post(_post)
 
@@ -429,8 +392,7 @@ class MyIOlightRGBW(LightEntity):
             _temp_string += f"f_OFF={int(element)-100}&"
         for element in self._blue_lights:
             _temp_string += f"f_OFF={int(element)-100}&"
-        #for element in self._white_lights:
-        #    _temp_string += f"f_OFF={int(element)-100}&"
+            
         # Send the _post to the myIO server
         await self.send_post(_temp_string)
 
@@ -467,16 +429,11 @@ class MyIOlightRGBW(LightEntity):
                     self._blue_value = _pwm_unit["state"]
                     if self._blue_value != 0:
                         self._state = True
-                #elif _element_d.startswith("W") and 100 < _element < 200:
-                #    self._white_value = _pwm_unit["state"]
-                #    if self._white_value != 0:
-                #       self._state = True
             except (ValueError, Exception):  # pylint: disable=broad-except
                 continue
 
         # defining HSB values from RGB values"""
         if self._state:
-           # self._white = self._white_value
             self._hsb_values = colorsys.rgb_to_hsv(
                 self._red_value / 255, self._green_value / 255, self._blue_value / 255
             )
