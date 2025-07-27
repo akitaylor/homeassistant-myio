@@ -6,8 +6,8 @@ from datetime import timedelta
 from homeassistant.components.light import (
     ColorMode,
     LightEntity,
+    ATTR_BRIGHTNESS
 )
-from homeassistant.const import ATTR_BRIGHTNESS, CONF_NAME
 from homeassistant.util import slugify
 
 from .comm.comms_thread import CommsThread2
@@ -24,7 +24,7 @@ COMMS_THREAD = CommsThread2()
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Add a light entity from a config_entry."""
     _id = 0
-    _server_name = slugify(config_entry.data[CONF_NAME])
+    _server_name = slugify(config_entry.data['name'])
     _server_status = hass.states.get(_server_name + ".state").state
     _server_data = hass.data[DOMAIN][_server_name]
     _relays = _server_data["relays"]
