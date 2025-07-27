@@ -24,6 +24,7 @@ COMMS_THREAD = CommsThread2()
 
 _LOGGER.debug("MYIO module is initiating")
 
+
 async def async_setup(hass, config):
     """Set up the myIO-server component."""
     _LOGGER.debug("async_setup is called")
@@ -33,7 +34,7 @@ async def async_setup(hass, config):
 async def async_setup_entry(hass, config_entry):
     """Set up config entry."""
     confstr = str(config_entry)
-    _LOGGER.debug(f'async_setup_entry is called: {confstr}')
+    _LOGGER.debug(f"async_setup_entry is called: {confstr}")
 
     _server_name = slugify(config_entry.data[CONF_NAME])
 
@@ -53,13 +54,15 @@ async def async_setup_entry(hass, config_entry):
         _temp_server_first_contact = hass.states.get(
             f"{_server_name}.first_contact"
         ).state
+
         if _temp_server_first_contact == "True":
-            for component in PLATFORMS:
-                hass.async_create_task(
-                    hass.config_entries.async_forward_entry_setup(
-                        config_entry, component
-                    )
+            # 2025.6+ – batch helper replaces the old per-platform helper
+            hass.async_create_task(
+                hass.config_entries.async_forward_entry_setups(
+                    config_entry,
+                    PLATFORMS,  # pass the full list once
                 )
+            )
 
     async def async_update_data():
         """Fetch data from API endpoint."""
@@ -85,7 +88,7 @@ async def async_setup_entry(hass, config_entry):
                     server_status=_temp_server_state,
                     config_entry=config_entry,
                     _post=None,
-                    hass = hass
+                    hass=hass,
                 ),
                 timeout=_timeout,
             )
@@ -125,16 +128,10 @@ async def async_setup_entry(hass, config_entry):
     return True
 
 
-async def async_unload_entry(
-    hass, config_entry
-):  # async_add_devices because platforms
+async def async_unload_entry(hass, config_entry):
     """Unload a config entry."""
-    unload_ok = all(
-        await asyncio.gather(
-            *(
-                hass.config_entries.async_forward_entry_unload(config_entry, component)
-                for component in PLATFORMS
-            )
-        )
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        config_entry,
+        PLATFORMS,
     )
     return unload_ok
