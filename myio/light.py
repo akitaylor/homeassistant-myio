@@ -86,9 +86,9 @@ class MyIOlight(LightEntity):
                 self._id - 101)]["state"]
             self._name = self._server_data["PWM"][str(
                 self._id - 101)]["description"]
-            # PWM supports brightness and color
-            self._attr_supported_color_modes = {ColorMode.HS, ColorMode.BRIGHTNESS}
-            self._attr_color_mode = ColorMode.HS
+            # PWM supports only brightness (not color)
+            self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+            self._attr_color_mode = ColorMode.BRIGHTNESS
 
         self._unique_id = _id
         self._hs_color = None

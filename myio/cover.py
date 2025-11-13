@@ -6,8 +6,6 @@ from .comm.comms_thread import CommsThread2
 
 from homeassistant.components.cover import (
     CoverDeviceClass,
-    STATE_CLOSING,
-    STATE_OPENING,
     CoverEntityFeature,
     CoverEntity,
 )
@@ -68,7 +66,6 @@ class MyIOCover(CoverEntity):
         )
         self._id = _id
         self.entity_id = f"cover.{_server_name}_{self._id}"
-        self._state = None
 
         def longest_substring_finder(string1, string2):
             answer = ""
@@ -90,6 +87,7 @@ class MyIOCover(CoverEntity):
         self._unique_id = _id
         self._is_opening = False
         self._is_closing = False
+        self._attr_is_closed = None  # Add this line
         self._available = True
         self._supported_features = SUPPORTED_FEATURES
         self._device_class = CoverDeviceClass.SHADE
@@ -105,11 +103,6 @@ class MyIOCover(CoverEntity):
             },
             "name": self.name,
         }
-
-    @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._state
 
     @property
     def available(self) -> bool:
@@ -218,9 +211,12 @@ class MyIOCover(CoverEntity):
         _relays = self._server_data["relays"]
         self._is_opening = _relays[str(int(self._relay_up) - 1)]["state"]
         self._is_closing = _relays[str(int(self._relay_down) - 1)]["state"]
-        if self._is_opening:
-            self._state = STATE_OPENING
-        elif self._is_closing:
-            self._state = STATE_CLOSING
+            
+        # Set is_closed based on the relay states
+        if self._is_opening or self._is_closing:
+            # If moving, we don't know if it's closed or not
+            self._attr_is_closed = None
         else:
-            self._state = None
+            # When stopped, you might want to set a specific logic here
+            # For now, we'll leave it as None (unknown)
+            self._attr_is_closed = None
