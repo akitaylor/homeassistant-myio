@@ -2,7 +2,8 @@
   "domain": "myio",
   "name": "myIO",
   "config_flow": true,
-  "documentation": "https://www.home-assistant.io/integrations/myio",
+  "documentation": "https://github.com/akitaylor/homeassistant-myio",
+  "issue_tracker": "https://github.com/akitaylor/homeassistant-myio/issues",
   "requirements": ["myio==0.0.6"],
   "version": "0.0.6",
   "codeowners": ["@SmarthomeNinja"]

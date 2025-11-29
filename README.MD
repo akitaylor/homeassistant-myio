@@ -4,6 +4,18 @@ MYIO is a home automation platform (<a href="http://smarthomeninja.hu" target="_
 
 Latest tested Home Assistant version: <b>2025.11</b>
 
+## Install via HACS (Custom repository)
+
+This integration is distributed as a HACS custom repository. You can install it either from a public or a private GitHub repository.
+
+1. In Home Assistant, open HACS → Integrations.
+2. Click the three dots (⋯) → Custom repositories.
+3. Add repository URL: `https://github.com/akitaylor/homeassistant-myio` with category `Integration`.
+   - If the repository is private, you must configure a GitHub Personal Access Token for HACS with at least read access to the repo (HACS → Settings → GitHub token).
+4. Find "myIO" in HACS → Integrations and click Install.
+5. Restart Home Assistant.
+6. Go to Settings → Devices & services → Add integration → search for "myIO", then follow the config flow.
+
 ## License
 
 Copyright (C)

@@ -4,12 +4,18 @@ from datetime import timedelta
 import logging
 
 from homeassistant.const import CONF_NAME
-from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
 
-from .const import CLIMATE, CONF_REFRESH_TIME, COVER, DOMAIN, LIGHT, SENSOR
-from .comm.comms_thread import CommsThread2
+from custom_components.myio.const import (
+    CLIMATE,
+    CONF_REFRESH_TIME,
+    COVER,
+    DOMAIN,
+    LIGHT,
+    SENSOR,
+)
+from custom_components.myio.comm.comms_thread import CommsThread2
 
 _LOGGER = logging.getLogger(__name__)
 
