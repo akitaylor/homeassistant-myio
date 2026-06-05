@@ -8,6 +8,7 @@ from homeassistant.components.light import (
     LightEntity,
     ATTR_BRIGHTNESS
 )
+from homeassistant.const import CONF_NAME
 from homeassistant.util import slugify
 
 from .comm.comms_thread import CommsThread2
@@ -24,7 +25,7 @@ COMMS_THREAD = CommsThread2()
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Add a light entity from a config_entry."""
     _id = 0
-    _server_name = slugify(config_entry.data['name'])
+    _server_name = slugify(config_entry.data[CONF_NAME])
     _server_status = hass.states.get(_server_name + ".state").state
     _server_data = hass.data[DOMAIN][_server_name]
     _relays = _server_data["relays"]
@@ -163,7 +164,11 @@ class MyIOlight(LightEntity):
             _post=post,
             hass = self.hass
         )
-        self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
+        self.hass.states.async_set(
+            f"{self._server_name}.state",
+            self._server_status,
+            COMMS_THREAD.get_monitoring_attributes(self._config_entry),
+        )
         return True
 
     async def async_turn_on(self, **kwargs) -> None:
@@ -280,8 +285,8 @@ class MyIOlightRGBW(LightEntity):
         self._hsb_values = colorsys.rgb_to_hsv(
             self._red_value / 255, self._green_value / 255, self._blue_value / 255
         )
-        self._brightness = self._hsb_values[2]
-        self._hs_color = [self._hsb_values[0], self._hsb_values[1]]
+        self._brightness = self._hsb_values[2] * 255
+        self._hs_color = [self._hsb_values[0] * 360, self._hsb_values[1] * 100]
         self._unique_id = int(_group) + 501
         self._available = True
 
@@ -349,8 +354,13 @@ class MyIOlightRGBW(LightEntity):
             server_status=self.server_status(),
             config_entry=self._config_entry,
             _post=post,
+            hass = self.hass
         )
-        self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
+        self.hass.states.async_set(
+            f"{self._server_name}.state",
+            self._server_status,
+            COMMS_THREAD.get_monitoring_attributes(self._config_entry),
+        )
         return True
 
     async def async_turn_on(self, **kwargs) -> None:
@@ -402,12 +412,16 @@ class MyIOlightRGBW(LightEntity):
         """Fetch new state data for the sensor."""
 
         self._server_data = self.hass.data[DOMAIN][self._server_name]
+        self._pwms = self._server_data["PWM"]
+        self._group = self._server_data["group"][str(self._id - 501)]
         if self.hass.states.get(self._server_name + ".state").state.startswith(
             "Online"
         ):
             self._available = True
         else:
             self._available = False
+
+        self._state = False
 
         # Check the group elements,
         # if one of them is turned on, the state goes true and refreshing its value

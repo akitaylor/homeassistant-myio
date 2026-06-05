@@ -1,12 +1,14 @@
 """This is a communicaton class to myIO-Server."""
 import asyncio
 import base64
+import copy
 import json
 import logging
-import sys
-import traceback
+import threading
+import time
 
 import requests
+from requests.adapters import HTTPAdapter
 from homeassistant.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -34,6 +36,12 @@ _LOGGER = logging.getLogger(__name__)
 
 _LOGGER.debug("Loading CommsThread2 (v1.9b1)")
 
+_HTTP_CONNECT_TIMEOUT = 1
+_HTTP_READ_TIMEOUT = 3.5
+_HTTP_TIMEOUT = (_HTTP_CONNECT_TIMEOUT, _HTTP_READ_TIMEOUT)
+_TCP_CONNECT_TIMEOUT = 10
+_TCP_READ_TIMEOUT = 5
+
 
 class Object(object):
     pass
@@ -42,33 +50,176 @@ class Object(object):
 class CommsThread2:
     """CommsThread can poll data from myIO Server, and send post to it"""
 
+    def __init__(self):
+        """Initialize reusable HTTP resources."""
+        self._http_session = requests.Session()
+        self._http_session.mount(
+            "http://",
+            HTTPAdapter(pool_connections=2, pool_maxsize=2, max_retries=0),
+        )
+        self._http_lock = threading.Lock()
+        self._http_error_servers = set()
+        self._http_failed_servers = set()
+        self._monitoring_by_server = {}
+        self._status_by_server = {}
+
+    def _server_key(self, config_entry):
+        """Build a stable log key for this configured server."""
+        server_name = slugify(config_entry.data[CONF_NAME])
+        host = config_entry.data[CONF_HOST].replace("https://", "").replace("http://", "")
+        return f"{server_name}@{host}:{config_entry.data[CONF_PORT]}"
+
+    def get_monitoring_attributes(self, config_entry):
+        """Return attributes published on the server state helper."""
+        server_key = self._server_key(config_entry)
+        return dict(self._monitoring_by_server.get(
+            server_key,
+            {
+                "query_latency": None,
+                "controller_status": "NOT OK",
+            },
+        ))
+
+    def _update_monitoring(self, server_key, status_code, latency):
+        """Store the latest HTTP monitoring values."""
+        self._monitoring_by_server[server_key] = {
+            "query_latency": round(latency, 3),
+            "controller_status": "OK" if status_code == 200 else "NOT OK",
+        }
+
+    def mark_query_timeout(self, config_entry, latency):
+        """Mark the controller as unavailable after an integration timeout."""
+        self._update_monitoring(self._server_key(config_entry), -1, latency)
+
+    def _log_status_change(self, server_key, server_status):
+        """Log availability only when it changes."""
+        previous_status = self._status_by_server.get(server_key)
+        if previous_status == server_status:
+            return
+
+        self._status_by_server[server_key] = server_status
+        if server_status.startswith("Online"):
+            _LOGGER.info("myIO server %s is %s", server_key, server_status)
+        else:
+            _LOGGER.warning("myIO server %s is %s", server_key, server_status)
+
+    def _log_http_retry(self, server_key, uri, err):
+        """Log the first failed HTTP attempt without flooding the log."""
+        if server_key in self._http_error_servers:
+            _LOGGER.debug("myIO HTTP retry for %s/%s: %s", server_key, uri, err)
+            return
+
+        self._http_error_servers.add(server_key)
+        _LOGGER.warning(
+            "myIO HTTP request failed for %s/%s, retrying: %s",
+            server_key,
+            uri,
+            err,
+        )
+
+    def _log_http_recovered(self, server_key):
+        """Log once when HTTP communication recovers."""
+        if server_key not in self._http_error_servers:
+            return
+
+        self._http_error_servers.remove(server_key)
+        self._http_failed_servers.discard(server_key)
+        _LOGGER.info("myIO HTTP communication recovered for %s", server_key)
+
+    def _log_http_failed(self, server_key, uri, err):
+        """Log the final HTTP failure once per outage."""
+        if server_key in self._http_failed_servers:
+            _LOGGER.debug(
+                "myIO HTTP request still failing for %s/%s: %s",
+                server_key,
+                uri,
+                err,
+            )
+            return
+
+        self._http_failed_servers.add(server_key)
+        _LOGGER.warning(
+            "myIO HTTP request failed for %s/%s after retry: %s",
+            server_key,
+            uri,
+            err,
+        )
+
+    def _merge_server_data(self, server_data, fresh_data, skip_keys=None):
+        """Safely merge a partial server response into the previous state."""
+        skip_keys = skip_keys or set()
+        merged_data = copy.deepcopy(server_data)
+
+        for key, values in fresh_data.items():
+            if key in skip_keys:
+                continue
+            if key == "relay":
+                key = "relays"
+            if (
+                key not in merged_data
+                or not isinstance(merged_data[key], dict)
+                or not isinstance(values, dict)
+            ):
+                merged_data[key] = copy.deepcopy(values)
+                continue
+            for number, new_values in values.items():
+                if number not in merged_data[key]:
+                    merged_data[key][number] = copy.deepcopy(new_values)
+                elif (
+                    isinstance(merged_data[key][number], dict)
+                    and isinstance(new_values, dict)
+                ):
+                    merged_data[key][number].update(new_values)
+                else:
+                    merged_data[key][number] = copy.deepcopy(new_values)
+
+        return merged_data
+
+    def _failed_response(self, err):
+        """Return a small response-like object for failed HTTP calls."""
+        res = Object()
+        res.status_code = -1
+        res.text = ""
+        res.error = str(err)
+        return res
+
     async def tcp_echo_client(_self, message, host, port):
         """ this code opens a socket to the host, send the message
         and returns the response
         """
-        _LOGGER.debug(f"TCP echo: {message}, {host}, {port}")
+        _LOGGER.debug(
+            "myIO TCP request to %s:%s, payload length=%s",
+            host,
+            port,
+            len(message),
+        )
         fut = asyncio.open_connection(host, port)
-        try:  # Wait for 3 seconds, then raise TimeoutError
-            reader, writer = await asyncio.wait_for(fut, timeout=10)
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(fut, timeout=_TCP_CONNECT_TIMEOUT)
 
             writer.write(message.encode())
             await writer.drain()
 
-            data = await reader.read()
+            data = await asyncio.wait_for(reader.read(), timeout=_TCP_READ_TIMEOUT)
             # _LOGGER.debug("Received: %s", data.decode())
 
-            writer.close()
-            await writer.wait_closed()
-            return data.decode()
-        except:
-            _LOGGER.debug("validation - TCP echo")
-            _LOGGER.debug(f"Exception in TCP echo: {traceback.format_exception(*sys.exc_info())}")
+            return data.decode(errors="replace")
+        except (asyncio.TimeoutError, OSError):
+            _LOGGER.debug("myIO TCP request failed for %s:%s", host, port, exc_info=True)
+            return ""
+        finally:
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except OSError:
+                    _LOGGER.debug("TCP socket close failed", exc_info=True)
 
     async def validate(self, host, port, app_port, name, password):
         """this function checks if the parameters are valid"""
         _toencode = f"{name}:{password}"
         _encoded = base64.b64encode(bytes(_toencode, encoding="utf8"))
-        _invalid = False
         _host = host.replace("https://", "").replace("http://", "")
         message = "cannot_connect"
 
@@ -80,14 +231,13 @@ class CommsThread2:
             message = "app_port_problem"
             response = await self.tcp_echo_client(f"{_encoded.decode()}\n?R\n", _host, app_port)
 
-            if response == ("." or "!"):
+            if response in (".", "!"):
                 message = "invalid_auth"
-            else:
+            elif response:
                 message = "ok"
 
-        except:  # pylint: disable=bare-except
-            _LOGGER.debug("validation - Except")
-            _LOGGER.debug(f"Exception in validation call: {traceback.format_exception(*sys.exc_info())}")
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.debug("myIO validation failed", exc_info=True)
 
         return message
 
@@ -111,32 +261,61 @@ class CommsThread2:
         _encoded = base64.b64encode(bytes(_toencode, encoding="utf8"))
 
         _invalid = False
-        _host_with_http = config_entry.data[CONF_HOST]
-        if not _host_with_http.startswith("http://"):
-            _host_with_http = f"http://{_host_with_http}"
+        _server_key = self._server_key(config_entry)
 
         def call_http(uri, data):
+            url = f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}"
+            auth = (
+                config_entry.data[CONF_USERNAME],
+                config_entry.data[CONF_PASSWORD],
+            )
+            started_at = time.monotonic()
             try:
                 _LOGGER.debug(f"Starting HTTP request: {uri}")
-                res = requests.get(url=f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}",
-                                   auth=(config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD]), data=data,
-                                   timeout=5)
+                with self._http_lock:
+                    res = self._http_session.get(
+                        url=url,
+                        auth=auth,
+                        data=data,
+                        timeout=_HTTP_TIMEOUT,
+                    )
+                self._update_monitoring(
+                    _server_key,
+                    res.status_code,
+                    time.monotonic() - started_at,
+                )
                 _LOGGER.debug(f"HTTP response: status={res.status_code}, length={len(res.text)}")
+                self._log_http_recovered(_server_key)
                 return res
-            except:
+            except requests.RequestException as err:
+                self._log_http_retry(_server_key, uri, err)
                 try:
                     _LOGGER.debug(f"Retrying HTTP request: {uri}")
-                    res = requests.get(url=f"http://{_host}:{config_entry.data[CONF_PORT]}/{uri}",
-                                       auth=(config_entry.data[CONF_USERNAME], config_entry.data[CONF_PASSWORD]), data=data,
-                                       timeout=5)
+                    with self._http_lock:
+                        res = self._http_session.get(
+                            url=url,
+                            auth=auth,
+                            data=data,
+                            timeout=_HTTP_TIMEOUT,
+                        )
+                    self._update_monitoring(
+                        _server_key,
+                        res.status_code,
+                        time.monotonic() - started_at,
+                    )
                     _LOGGER.debug(f"HTTP response: status={res.status_code}, length={len(res.text)}")
                     _LOGGER.debug(f"HTTP response: {res}")
+                    self._log_http_recovered(_server_key)
                     return res
-                except:
-                    _LOGGER.debug(f"Exception in HTTP request: {traceback.format_exception(*sys.exc_info())}")
-                    res = Object()
-                    res.status_code = -1
-                    return res
+                except requests.RequestException as retry_err:
+                    self._update_monitoring(
+                        _server_key,
+                        -1,
+                        time.monotonic() - started_at,
+                    )
+                    self._log_http_failed(_server_key, uri, retry_err)
+                    _LOGGER.debug("myIO HTTP request failed after retry", exc_info=True)
+                    return self._failed_response(retry_err)
 
         _LOGGER.debug(f"Server status: {server_status}")
         if not server_status.startswith("Online"):
@@ -152,6 +331,8 @@ class CommsThread2:
                 else:
                     server_status = "Invalid"
                     _invalid = True
+                    self._log_status_change(_server_key, server_status)
+                    return [server_data, server_status]
 
                 if server_status == "Online-1":  # add sensors key to the database
                     server_data["sensors"] = {}
@@ -190,14 +371,17 @@ class CommsThread2:
                                 ] = int(_temp_json[element])
                                 _id = _id + 1
 
-                _LOGGER.debug(f"Server_data printing...")
-                for k in server_data:
-                    _LOGGER.debug(f"Server_data[{k}]= {server_data[k]}")
-                _LOGGER.debug(f"Server_data end.")
+                _LOGGER.debug("Server data sections loaded: %s", list(server_data))
 
                 for desc in _DESCRIPTIONS:  # try to add descriptions from xml files
                     _LOGGER.debug(f"Getting server_data {desc}")
                     _LOGGER.debug(f"Getting _DESCRIPTIONS[desc] = {_DESCRIPTIONS[desc]}")
+                    if _DESCRIPTIONS[desc] not in server_data:
+                        _LOGGER.debug(
+                            "Skipping description query for missing data key: %s",
+                            _DESCRIPTIONS[desc],
+                        )
+                        continue
                     _desc_data = server_data[_DESCRIPTIONS[desc]]
                     for element in _desc_data:
                         if _desc_data[element].get("description", -1) == -1:
@@ -206,8 +390,7 @@ class CommsThread2:
                     _LOGGER.debug(f"Calling description query for '{desc}'")
                     message = f"GET /{desc}_desc.xml HTTP/1.1\nAuthorization: Basic {_encoded.decode()}\n\n"
                     try:
-                        _LOGGER.debug(f"Desc query: message={message}")
-                        _LOGGER.debug(f"Desc query: _port_http={_port_http}")
+                        _LOGGER.debug("myIO description query %s on port %s", desc, _port_http)
                         response = await self.tcp_echo_client(
                             message,
                             _host,
@@ -241,15 +424,19 @@ class CommsThread2:
                                         ]
                                         break
                             server_data[_DESCRIPTIONS[desc]] = _desc_data.copy()
-                    except:  # pylint: disable=bare-except
+                    except Exception as err:  # pylint: disable=broad-except
                         if not _invalid:
-                            _LOGGER.debug(f"Descriptions - exception - message: {message}")
-                            _LOGGER.debug(
-                                f"Descriptions query: An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                            _LOGGER.warning(
+                                "myIO description query failed for %s/%s: %s",
+                                _server_key,
+                                desc,
+                                err,
+                            )
+                            _LOGGER.debug("myIO description query traceback", exc_info=True)
 
-            except Exception as e:  # pylint: disable=bare-except
-                _LOGGER.debug(f"Exception in send: {e}")
-                _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("myIO initial refresh failed for %s: %s", _server_key, err)
+                _LOGGER.debug("myIO initial refresh traceback", exc_info=True)
                 if not _invalid:
                     server_status = "Offline"
 
@@ -264,21 +451,14 @@ class CommsThread2:
                             body = res.text
                             _LOGGER.debug(f"Response length: {len(body)}")
 
-                            # Merge fresh server status to server_data
-                            _temp_data = server_data
                             _temp_json = json.loads(body)
-                            for key in _temp_data:
-                                for number in _temp_data[key]:
-                                    _temp_data[key][number].update(
-                                        _temp_json[key][number]
-                                    )
-                            server_data = _temp_data.copy()
+                            server_data = self._merge_server_data(server_data, _temp_json)
                         else:
                             server_status = "Invalid"
                             _invalid = True
-                    except Exception as e:  # pylint: disable=bare-except
-                        _LOGGER.debug(f"Exception in sens_out.json: {e}")
-                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                    except Exception as err:  # pylint: disable=broad-except
+                        _LOGGER.warning("myIO sens_out.json refresh failed for %s: %s", _server_key, err)
+                        _LOGGER.debug("myIO sens_out.json refresh traceback", exc_info=True)
                         if not _invalid:
                             server_status = "Offline"
 
@@ -290,26 +470,17 @@ class CommsThread2:
                         if res.status_code == 200:
                             body = res.text
                             _LOGGER.debug(f"Response length: {len(body)}")
-                            _temp_data = server_data
                             _temp_json = json.loads(body)
-                            if _temp_json.get("relay") != None:
-                                # repair database key relay->relays
+                            if _temp_json.get("relay") is not None:
                                 _temp_json["relays"] = _temp_json.pop("relay")
-                            # Merge fresh server status to server_data
-                            for key in _temp_data:
-                                if key != "sensors":
-                                    for number in _temp_data[key]:
-                                        _temp_data[key][number].update(
-                                            _temp_json[key][number]
-                                        )
-                            server_data = _temp_data.copy()
+                            server_data = self._merge_server_data(server_data, _temp_json, skip_keys={"sensors"})
                         else:
                             _LOGGER.debug("Invalid output.json")
                             server_status = "Invalid"
                             _invalid = True
-                    except Exception as e:  # pylint: disable=bare-except
-                        _LOGGER.debug("except Online-output.json")
-                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                    except Exception as err:  # pylint: disable=broad-except
+                        _LOGGER.warning("myIO output.json refresh failed for %s: %s", _server_key, err)
+                        _LOGGER.debug("myIO output.json refresh traceback", exc_info=True)
                         server_status = "Offline"
                     try:
                         # try to get sensors datas
@@ -350,15 +521,16 @@ class CommsThread2:
                                         _SENSORS[sensor]
                                     ] = int(_temp_json[element])
                                     _id = _id + 1
-                    except Exception as e:  # pylint: disable=bare-except
-                        _LOGGER.debug("Online-sensors exception")
-                        _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+                    except Exception as err:  # pylint: disable=broad-except
+                        _LOGGER.warning("myIO sensor TCP refresh failed for %s: %s", _server_key, err)
+                        _LOGGER.debug("myIO sensor TCP refresh traceback", exc_info=True)
                         server_status = "Offline"
 
-            except Exception as e:  # pylint: disable=bare-except
-                _LOGGER.debug(f"Exception in sens_out.json: {e}")
-                _LOGGER.debug(f"An error occurred: {traceback.format_exception(*sys.exc_info())}")
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("myIO refresh failed for %s: %s", _server_key, err)
+                _LOGGER.debug("myIO refresh traceback", exc_info=True)
                 if not _invalid:
                     server_status = "Offline"
         _LOGGER.debug(f"MYIO setup finished: {server_status}")
+        self._log_status_change(_server_key, server_status)
         return [server_data, server_status]

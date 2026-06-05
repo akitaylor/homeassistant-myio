@@ -4,7 +4,6 @@
   "config_flow": true,
   "documentation": "https://github.com/akitaylor/homeassistant-myio",
   "issue_tracker": "https://github.com/akitaylor/homeassistant-myio/issues",
-  "requirements": ["myio==0.0.6"],
-  "version": "0.0.6",
+  "version": "2.0.1",
   "codeowners": ["@SmarthomeNinja"]
 }

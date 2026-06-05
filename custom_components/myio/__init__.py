@@ -46,7 +46,11 @@ async def async_setup_entry(hass, config_entry):
 
     hass.data.setdefault(DOMAIN, {})[_server_name] = {}
 
-    hass.states.async_set(f"{_server_name}.state", "Offline")
+    hass.states.async_set(
+        f"{_server_name}.state",
+        "Offline",
+        COMMS_THREAD.get_monitoring_attributes(config_entry),
+    )
     hass.states.async_set(f"{_server_name}.first_contact", "True")
 
     _refresh_timer = config_entry.options.get(CONF_REFRESH_TIME, 6)
@@ -100,9 +104,14 @@ async def async_setup_entry(hass, config_entry):
             )
         except asyncio.TimeoutError:
             _comms_thread_timeout = True
+            COMMS_THREAD.mark_query_timeout(config_entry, _timeout)
             _LOGGER.debug(f"{_server_name} - Comms_Thread timeout")
 
-        hass.states.async_set(f"{_server_name}.state", _temp_server_state)
+        hass.states.async_set(
+            f"{_server_name}.state",
+            _temp_server_state,
+            COMMS_THREAD.get_monitoring_attributes(config_entry),
+        )
 
         if _temp_server_state.startswith("Online") and was_offline:
             hass.states.async_set(f"{_server_name}.available", True)
@@ -111,7 +120,11 @@ async def async_setup_entry(hass, config_entry):
         elif not was_offline and _temp_server_state == "Offline":
             _LOGGER.debug(f"{_server_name} - Platform Not Ready")
             hass.states.async_set(f"{_server_name}.available", False)
-            hass.states.async_set(f"{_server_name}.state", "Offline")
+            hass.states.async_set(
+                f"{_server_name}.state",
+                "Offline",
+                COMMS_THREAD.get_monitoring_attributes(config_entry),
+            )
             # raise PlatformNotReady
 
     coordinator = DataUpdateCoordinator(

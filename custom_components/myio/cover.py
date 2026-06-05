@@ -164,7 +164,11 @@ class MyIOCover(CoverEntity):
             _post=post,
             hass = self.hass
         )
-        self.hass.states.async_set(f"{self._server_name}.state", self._server_status)
+        self.hass.states.async_set(
+            f"{self._server_name}.state",
+            self._server_status,
+            COMMS_THREAD.get_monitoring_attributes(self._config_entry),
+        )
         return True
 
     async def async_close_cover(self, **kwargs):
